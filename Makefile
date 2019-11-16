@@ -7,4 +7,4 @@ install: all
 	install -d $(DESTDIR)/usr/bin
 	install sed $(DESTDIR)/usr/bin
 	install -d $(DESTDIR)/usr/share/man/man1
-	install -md644 sed.1 $(DESTDIR)/usr/share/man/man1
+	install -m644 sed.1 $(DESTDIR)/usr/share/man/man1
