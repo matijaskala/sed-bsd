@@ -64,6 +64,10 @@ static const char sccsid[] = "@(#)compile.c	8.1 (Berkeley) 6/6/93";
 #include "defs.h"
 #include "extern.h"
 
+#ifndef DEFFILEMODE
+# define DEFFILEMODE (S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH)/* 0666*/
+#endif
+
 #define LHSZ	128
 #define	LHMASK	(LHSZ - 1)
 static struct labhash {

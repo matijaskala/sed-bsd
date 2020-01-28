@@ -65,6 +65,10 @@ static const char sccsid[] = "@(#)process.c	8.6 (Berkeley) 4/20/94";
 #include <wchar.h>
 #include <wctype.h>
 
+#ifndef DEFFILEMODE
+# define DEFFILEMODE (S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH)/* 0666*/
+#endif
+
 #include "defs.h"
 #include "extern.h"
 
