@@ -436,7 +436,7 @@ mf_fgets(SPACE *sp, enum e_spflag spflag)
 			if ((outfile = fopen(tmpfname, "w")) == NULL)
 				err(1, "%s", fname);
 			fchown(fileno(outfile), sb.st_uid, sb.st_gid);
-			fchmod(fileno(outfile), sb.st_mode & ALLPERMS);
+			fchmod(fileno(outfile), sb.st_mode & 07777);
 			outfname = tmpfname;
 			if (!ispan) {
 				linenum = 0;
