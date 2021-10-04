@@ -83,7 +83,7 @@ static char	 *compile_delimited(char *, char *, int);
 static char	 *compile_flags(char *, struct s_subst *);
 static regex_t	 *compile_re(char *, int);
 static char	 *compile_subst(char *, struct s_subst *);
-static char	 *compile_text(void);
+static char	 *compile_text(const char *);
 static char	 *compile_tr(char *, struct s_tr **);
 static struct s_command
 		**compile_stream(struct s_command **);
@@ -272,16 +272,17 @@ nonsel:		/* Now parse the command */
 		case TEXT:			/* a c i */
 			p++;
 			EATSPACE();
-			if (*p != '\\')
-				errx(1,
-"%lu: %s: command %c expects \\ followed by text", linenum, fname, cmd->code);
+			if (*p != '\\') {
+				cmd->t = compile_text(p);
+				break;
+			}
 			p++;
 			EATSPACE();
-			if (*p)
-				errx(1,
-				"%lu: %s: extra characters after \\ at the end of %c command",
-				linenum, fname, cmd->code);
-			cmd->t = compile_text();
+			if (*p) {
+				cmd->t = compile_text(p);
+				break;
+			}
+			cmd->t = compile_text("");
 			break;
 		case COMMENT:			/* \0 # */
 			break;
@@ -738,17 +739,30 @@ compile_tr(char *p, struct s_tr **py)
  * Compile the text following an a or i command.
  */
 static char *
-compile_text(void)
+compile_text(const char *prepend)
 {
 	size_t asize, size;
 	int esc_nl;
-	char *text, *p, *op, *s;
+	const char *p, *op;
+	char *text, *s;
 	char lbuf[_POSIX2_LINE_MAX + 1];
 
 	asize = 2 * _POSIX2_LINE_MAX + 1;
 	text = xmalloc(asize);
-	size = 0;
-	while (cu_fgets(lbuf, sizeof(lbuf), NULL)) {
+	op = s = text;
+	p = prepend;
+	if (*prepend)
+		for (esc_nl = 0; *p != '\0'; p++) {
+			if (*p == '\\' && p[1] != '\0' && *++p == '\n')
+				esc_nl = 1;
+			*s++ = *p;
+		}
+	else
+		esc_nl = 1;
+	size = (size_t)(s - op);
+	if (!esc_nl)
+		*s = '\0';
+	else while (cu_fgets(lbuf, sizeof(lbuf), NULL)) {
 		op = s = text + size;
 		p = lbuf;
 		for (esc_nl = 0; *p != '\0'; p++) {
@@ -766,9 +780,10 @@ compile_text(void)
 			text = xrealloc(text, asize);
 		}
 	}
+	if (text[size-1] != '\n')
+		text[size++] = '\n';
 	text[size] = '\0';
-	p = xrealloc(text, size + 1);
-	return (p);
+	return xrealloc(text, size + 1);
 }
 
 /*
