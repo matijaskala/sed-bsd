@@ -350,9 +350,11 @@ nonsel:		/* Now parse the command */
 			else
 				cmd->u.s->re = compile_re(re, cmd->u.s->icase);
 			EATSPACE();
-			if (*p == ';') {
+			switch (*p) {
+			case ';':
 				p++;
 				link = &cmd->next;
+			case '}':
 				goto semicolon;
 			}
 			break;
@@ -590,6 +592,7 @@ compile_flags(char *p, struct s_subst *s)
 		case '\0':
 		case '\n':
 		case ';':
+		case '}':
 			return (p);
 		case 'p':
 			s->p = 1;
