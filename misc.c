@@ -1,6 +1,6 @@
-/*	$NetBSD: misc.c,v 1.15 2014/06/26 02:14:32 christos Exp $	*/
-
 /*-
+ * SPDX-License-Identifier: BSD-3-Clause
+ *
  * Copyright (c) 1992 Diomidis Spinellis.
  * Copyright (c) 1992, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -33,17 +33,10 @@
  * SUCH DAMAGE.
  */
 
-#if HAVE_NBTOOL_CONFIG_H
-#include "nbtool_config.h"
-#endif
-
 #include <sys/cdefs.h>
-__RCSID("$NetBSD: misc.c,v 1.15 2014/06/26 02:14:32 christos Exp $");
-#ifdef __FBSDID
-__FBSDID("$FreeBSD: head/usr.bin/sed/misc.c 200462 2009-12-13 03:14:06Z delphij $");
-#endif
+__FBSDID("$FreeBSD$");
 
-#if 0
+#ifndef lint
 static const char sccsid[] = "@(#)misc.c	8.1 (Berkeley) 6/6/93";
 #endif
 
@@ -60,45 +53,6 @@ static const char sccsid[] = "@(#)misc.c	8.1 (Berkeley) 6/6/93";
 #include "extern.h"
 
 /*
- * malloc with result test
- */
-void *
-xmalloc(size_t size)
-{
-	void *p;
-
-	if ((p = malloc(size)) == NULL)
-		err(1, "malloc(%zu)", size);
-	return p;
-}
-
-/*
- * realloc with result test
- */
-void *
-xrealloc(void *p, size_t size)
-{
-	if (p == NULL)			/* Compatibility hack. */
-		return (xmalloc(size));
-
-	if ((p = realloc(p, size)) == NULL)
-		err(1, "realloc(%zu)", size);
-	return p;
-}
-
-/*
- * realloc with result test
- */
-void *
-xcalloc(size_t c, size_t n)
-{
-	void *p;
-
-	if ((p = calloc(c, n)) == NULL)
-		err(1, "calloc(%zu, %zu)", c, n);
-	return p;
-}
-/*
  * Return a string for a regular expression error passed.  This is overkill,
  * because of the silly semantics of regerror (we can never know the size of
  * the buffer).
@@ -106,14 +60,14 @@ xcalloc(size_t c, size_t n)
 char *
 strregerror(int errcode, regex_t *preg)
 {
-	char buf[1];
 	static char *oe;
 	size_t s;
 
 	if (oe != NULL)
 		free(oe);
-	s = regerror(errcode, preg, buf, 0);
-	oe = xmalloc(s);
+	s = regerror(errcode, preg, NULL, 0);
+	if ((oe = malloc(s)) == NULL)
+		err(1, "malloc");
 	(void)regerror(errcode, preg, oe, s);
 	return (oe);
 }

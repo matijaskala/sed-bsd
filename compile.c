@@ -1,6 +1,6 @@
-/*	$NetBSD: compile.c,v 1.47 2016/04/05 00:13:03 christos Exp $	*/
-
 /*-
+ * SPDX-License-Identifier: BSD-3-Clause
+ *
  * Copyright (c) 1992 Diomidis Spinellis.
  * Copyright (c) 1992, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -33,17 +33,10 @@
  * SUCH DAMAGE.
  */
 
-#if HAVE_NBTOOL_CONFIG_H
-#include "nbtool_config.h"
-#endif
-
 #include <sys/cdefs.h>
-__RCSID("$NetBSD: compile.c,v 1.47 2016/04/05 00:13:03 christos Exp $");
-#ifdef __FBSDID
-__FBSDID("$FreeBSD: head/usr.bin/sed/compile.c 259132 2013-12-09 18:57:20Z eadler $");
-#endif
+__FBSDID("$FreeBSD$");
 
-#if 0
+#ifndef lint
 static const char sccsid[] = "@(#)compile.c	8.1 (Berkeley) 6/6/93";
 #endif
 
@@ -56,6 +49,7 @@ static const char sccsid[] = "@(#)compile.c	8.1 (Berkeley) 6/6/93";
 #include <fcntl.h>
 #include <limits.h>
 #include <regex.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -148,9 +142,13 @@ compile(void)
 	*compile_stream(&prog) = NULL;
 	fixuplabel(prog, NULL);
 	uselabel();
-	if (appendnum > 0)
-		appends = xmalloc(sizeof(struct s_appends) * appendnum);
-	match = xmalloc((maxnsub + 1) * sizeof(regmatch_t));
+	if (appendnum == 0)
+		appends = NULL;
+	else if ((appends = malloc(sizeof(struct s_appends) * appendnum)) ==
+	    NULL)
+		err(1, "malloc");
+	if ((match = malloc((maxnsub + 1) * sizeof(regmatch_t))) == NULL)
+		err(1, "malloc");
 }
 
 #define EATSPACE() do {							\
@@ -187,7 +185,8 @@ semicolon:	EATSPACE();
 				goto semicolon;
 			}
 		}
-		*link = cmd = xmalloc(sizeof(struct s_command));
+		if ((*link = cmd = malloc(sizeof(struct s_command))) == NULL)
+			err(1, "malloc");
 		link = &cmd->next;
 		cmd->startline = cmd->nonsel = 0;
 		/* First parse the addresses */
@@ -197,14 +196,17 @@ semicolon:	EATSPACE();
 #define	addrchar(c)	(strchr("0123456789/\\$", (c)))
 		if (addrchar(*p)) {
 			naddr++;
-			cmd->a1 = xmalloc(sizeof(struct s_addr));
+			if ((cmd->a1 = malloc(sizeof(struct s_addr))) == NULL)
+				err(1, "malloc");
 			p = compile_addr(p, cmd->a1);
 			EATSPACE();				/* EXTENSION */
 			if (*p == ',') {
 				p++;
 				EATSPACE();			/* EXTENSION */
 				naddr++;
-				cmd->a2 = xmalloc(sizeof(struct s_addr));
+				if ((cmd->a2 = malloc(sizeof(struct s_addr)))
+				    == NULL)
+					err(1, "malloc");
 				p = compile_addr(p, cmd->a2);
 				EATSPACE();
 			} else
@@ -329,7 +331,8 @@ nonsel:		/* Now parse the command */
 				errx(1,
 "%lu: %s: substitute pattern can not be delimited by newline or backslash",
 					linenum, fname);
-			cmd->u.s = xcalloc(1, sizeof(struct s_subst));
+			if ((cmd->u.s = calloc(1, sizeof(struct s_subst))) == NULL)
+				err(1, "malloc");
 			p = compile_delimited(p, re, 0);
 			if (p == NULL)
 				errx(1,
@@ -381,6 +384,51 @@ nonsel:		/* Now parse the command */
 	}
 }
 
+static int
+hex2char(const char *in, char *out, int len)
+{
+	long ord;
+	char *endptr, hexbuf[3];
+
+	hexbuf[0] = in[0];
+	hexbuf[1] = len > 1 ? in[1] : '\0';
+	hexbuf[2] = '\0';
+
+	errno = 0;
+	ord = strtol(hexbuf, &endptr, 16);
+	if (*endptr != '\0' || errno != 0)
+		return (ERANGE);
+	*out = (char)ord;
+	return (0);
+}
+
+static bool
+hexdigit(char c)
+{
+	int lc;
+
+	lc = tolower(c);
+	return isdigit(lc) || (lc >= 'a' && lc <= 'f');
+}
+
+static bool
+dohex(const char *in, char *out, int *len)
+{
+	int tmplen;
+
+	if (!hexdigit(in[0]))
+		return (false);
+	tmplen = 1;
+	if (hexdigit(in[1]))
+		++tmplen;
+	if (hex2char(in, out, tmplen) == 0) {
+		*len = tmplen;
+		return (true);
+	}
+
+	return (false);
+}
+
 /*
  * Get a delimited string.  P points to the delimiter of the string; d points
  * to a buffer area.  Newline and delimiter escapes are processed; other
@@ -393,6 +441,7 @@ nonsel:		/* Now parse the command */
 static char *
 compile_delimited(char *p, char *d, int is_tr)
 {
+	int hexlen;
 	char c;
 
 	c = *p++;
@@ -436,6 +485,12 @@ compile_delimited(char *p, char *d, int is_tr)
 			}
 			p += 2;
 			continue;
+		} else if (*p == '\\' && p[1] == 'x') {
+			if (dohex(&p[2], d, &hexlen)) {
+				++d;
+				p += hexlen + 2;
+				continue;
+			}
 		} else if (*p == '\\' && p[1] == '\\') {
 			if (is_tr)
 				p++;
@@ -455,7 +510,7 @@ compile_delimited(char *p, char *d, int is_tr)
 static char *
 compile_ccl(char **sp, char *t)
 {
-	int c, d;
+	int c, d, hexlen;
 	char *s = *sp;
 
 	*t++ = *s++;
@@ -483,6 +538,10 @@ compile_ccl(char **sp, char *t)
 				*t = '\t';
 				s++;
 				break;
+			case 'x':
+				if (dohex(&s[2], t, &hexlen))
+					s += hexlen + 1;
+				break;
 			}
 		}
 	}
@@ -504,7 +563,8 @@ compile_re(char *re, int case_insensitive)
 	flags = rflags;
 	if (case_insensitive)
 		flags |= REG_ICASE;
-	rep = xmalloc(sizeof(regex_t));
+	if ((rep = malloc(sizeof(regex_t))) == NULL)
+		err(1, "malloc");
 	if ((eval = regcomp(rep, re, flags)) != 0)
 		errx(1, "%lu: %s: RE error: %s",
 				linenum, fname, strregerror(eval, rep));
@@ -522,7 +582,7 @@ static char *
 compile_subst(char *p, struct s_subst *s)
 {
 	static char lbuf[_POSIX2_LINE_MAX + 1];
-	size_t asize, size;
+	int asize, hexlen, size;
 	u_char ref;
 	char c, *text, *op, *sp;
 	int more = 1, sawesc = 0;
@@ -534,7 +594,8 @@ compile_subst(char *p, struct s_subst *s)
 	s->maxbref = 0;
 	s->linenum = linenum;
 	asize = 2 * _POSIX2_LINE_MAX + 1;
-	text = xmalloc(asize);
+	if ((text = malloc(asize)) == NULL)
+		err(1, "malloc");
 	size = 0;
 	do {
 		op = sp = text + size;
@@ -563,7 +624,7 @@ compile_subst(char *p, struct s_subst *s)
 					continue;
 				} else if (strchr("123456789", *p) != NULL) {
 					*sp++ = '\\';
-					ref = (u_char)(*p - '0');
+					ref = *p - '0';
 					if (s->re != NULL &&
 					    ref > s->re->re_nsub)
 						errx(1, "%lu: %s: \\%c not defined in the RE",
@@ -585,6 +646,21 @@ compile_subst(char *p, struct s_subst *s)
 					case 't':
 						*p = '\t';
 						break;
+					case 'x':
+#define	ADVANCE_N(s, n)					\
+	do {						\
+		char *adv = (s);			\
+		while (*(adv + (n) - 1) != '\0') {	\
+			*adv = *(adv + (n));		\
+			++adv;				\
+		}					\
+		*adv = '\0';				\
+	} while (0);
+						if (dohex(&p[1], p, &hexlen)) {
+							ADVANCE_N(p + 1,
+							    hexlen);
+						}
+						break;
 					}
 				}
 			} else if (*p == c) {
@@ -593,8 +669,9 @@ compile_subst(char *p, struct s_subst *s)
 						p = lbuf;
 				}
 				*sp++ = '\0';
-				size += (size_t)(sp - op);
-				s->new = xrealloc(text, size);
+				size += sp - op;
+				if ((s->new = realloc(text, size)) == NULL)
+					err(1, "realloc");
 				return (p);
 			} else if (*p == '\n') {
 				errx(1,
@@ -603,10 +680,11 @@ compile_subst(char *p, struct s_subst *s)
 			}
 			*sp++ = *p;
 		}
-		size += (size_t)(sp - op);
+		size += sp - op;
 		if (asize - size < _POSIX2_LINE_MAX + 1) {
 			asize *= 2;
-			text = xrealloc(text, asize);
+			if ((text = realloc(text, asize)) == NULL)
+				err(1, "realloc");
 		}
 	} while (cu_fgets(p = lbuf, sizeof(lbuf), &more) != NULL);
 	errx(1, "%lu: %s: unterminated substitute in regular expression",
@@ -622,7 +700,7 @@ compile_flags(char *p, struct s_subst *s)
 {
 	int gn;			/* True if we have seen g or n */
 	unsigned long nval;
-	char wfile[_POSIX2_LINE_MAX + 1], *q;
+	char wfile[_POSIX2_LINE_MAX + 1], *q, *eq;
 
 	s->n = 1;				/* Default */
 	s->p = 0;
@@ -659,11 +737,11 @@ compile_flags(char *p, struct s_subst *s)
 "%lu: %s: more than one number or 'g' in substitute flags", linenum, fname);
 			gn = 1;
 			errno = 0;
-			nval = strtoul(p, &p, 10);
+			nval = strtol(p, &p, 10);
 			if (errno == ERANGE || nval > INT_MAX)
 				errx(1,
 "%lu: %s: overflow in the 'N' substitute flag", linenum, fname);
-			s->n = (int)nval;
+			s->n = nval;
 			p--;
 			break;
 		case 'w':
@@ -676,9 +754,12 @@ compile_flags(char *p, struct s_subst *s)
 #endif
 			EATSPACE();
 			q = wfile;
+			eq = wfile + sizeof(wfile) - 1;
 			while (*p) {
 				if (*p == '\n')
 					break;
+				if (q >= eq)
+					err(1, "wfile too long");
 				*q++ = *p++;
 			}
 			*q = '\0';
@@ -706,14 +787,15 @@ static char *
 compile_tr(char *p, struct s_tr **py)
 {
 	struct s_tr *y;
-	size_t i;
+	int i;
 	const char *op, *np;
 	char old[_POSIX2_LINE_MAX + 1];
 	char new[_POSIX2_LINE_MAX + 1];
 	size_t oclen, oldlen, nclen, newlen;
 	mbstate_t mbs1, mbs2;
 
-	*py = y = xmalloc(sizeof(*y));
+	if ((*py = y = malloc(sizeof(*y))) == NULL)
+		err(1, NULL);
 	y->multis = NULL;
 	y->nmultis = 0;
 
@@ -747,9 +829,9 @@ compile_tr(char *p, struct s_tr **py)
 		 * lookup table.
 		 */
 		for (i = 0; i <= UCHAR_MAX; i++)
-			y->bytetab[i] = (u_char)i;
+			y->bytetab[i] = (char)i;
 		for (; *op; op++, np++)
-			y->bytetab[(u_char)*op] = (u_char)*np;
+			y->bytetab[(u_char)*op] = *np;
 	} else {
 		/*
 		 * Multi-byte encoding case: generate a lookup table as
@@ -761,7 +843,7 @@ compile_tr(char *p, struct s_tr **py)
 		memset(&mbs1, 0, sizeof(mbs1));
 		memset(&mbs2, 0, sizeof(mbs2));
 		for (i = 0; i <= UCHAR_MAX; i++)
-			y->bytetab[i] = (u_char)((btowc((int)i) != WEOF) ? i : 0);
+			y->bytetab[i] = (btowc(i) != WEOF) ? i : 0;
 		while (*op != '\0') {
 			oclen = mbrlen(op, MB_LEN_MAX, &mbs1);
 			if (oclen == (size_t)-1 || oclen == (size_t)-2)
@@ -770,11 +852,13 @@ compile_tr(char *p, struct s_tr **py)
 			if (nclen == (size_t)-1 || nclen == (size_t)-2)
 				errc(1, EILSEQ, NULL);
 			if (oclen == 1 && nclen == 1)
-				y->bytetab[(u_char)*op] = (u_char)*np;
+				y->bytetab[(u_char)*op] = *np;
 			else {
 				y->bytetab[(u_char)*op] = 0;
-				y->multis = xrealloc(y->multis,
+				y->multis = realloc(y->multis,
 				    (y->nmultis + 1) * sizeof(*y->multis));
+				if (y->multis == NULL)
+					err(1, NULL);
 				i = y->nmultis++;
 				y->multis[i].fromlen = oclen;
 				memcpy(y->multis[i].from, op, oclen);
@@ -789,19 +873,19 @@ compile_tr(char *p, struct s_tr **py)
 }
 
 /*
- * Compile the text following an a or i command.
+ * Compile the text following an a, c, or i command.
  */
 static char *
 compile_text(char *p)
 {
-	size_t asize, size;
-	int esc_nl;
+	int asize, esc_nl, size;
 	const char *op;
 	char *text, *s;
 	char lbuf[_POSIX2_LINE_MAX + 1];
 
 	asize = 2 * _POSIX2_LINE_MAX + 1;
-	text = xmalloc(asize);
+	if ((text = malloc(asize)) == NULL)
+		err(1, "malloc");
 	size = 0;
 	do {
 		op = s = text + size;
@@ -810,21 +894,23 @@ compile_text(char *p)
 				esc_nl = 1;
 			*s++ = *p;
 		}
-		size += (size_t)(s - op);
+		size += s - op;
 		if (!esc_nl) {
 			*s = '\0';
 			break;
 		}
 		if (asize - size < _POSIX2_LINE_MAX + 1) {
 			asize *= 2;
-			text = xrealloc(text, asize);
+			if ((text = realloc(text, asize)) == NULL)
+				err(1, "realloc");
 		}
 	} while (cu_fgets(p = lbuf, sizeof(lbuf), NULL) != NULL);
 	if (text[size-1] != '\n')
 		text[size++] = '\n';
 	text[size] = '\0';
-	text = xrealloc(text, size + 1);
-	return text;
+	if ((p = realloc(text, size + 1)) == NULL)
+		err(1, "realloc");
+	return (p);
 }
 
 /*
@@ -873,7 +959,7 @@ compile_addr(char *p, struct s_addr *a)
 	case '5': case '6': case '7': case '8': case '9':
 		if (a->type == 0)
 			a->type = AT_LINE;
-		a->u.l = strtoul(p, &end, 10);
+		a->u.l = strtol(p, &end, 10);
 		return (end);
 	default:
 		errx(1, "%lu: %s: expected context address", linenum, fname);
@@ -898,8 +984,9 @@ duptoeol(char *s, const char *ctype)
 	*s = '\0';
 	if (ws)
 		warnx("%lu: %s: whitespace after %s", linenum, fname, ctype);
-	len = (size_t)(s - start + 1);
-	p = xmalloc(len);
+	len = s - start + 1;
+	if ((p = malloc(len)) == NULL)
+		err(1, "malloc");
 	return (memmove(p, start, len));
 }
 
@@ -954,7 +1041,8 @@ enterlabel(struct s_command *cp)
 	for (lh = *lhp; lh != NULL; lh = lh->lh_next)
 		if (lh->lh_hash == h && strcmp(cp->t, lh->lh_cmd->t) == 0)
 			errx(1, "%lu: %s: duplicate label '%s'", linenum, fname, cp->t);
-	lh = xmalloc(sizeof *lh);
+	if ((lh = malloc(sizeof *lh)) == NULL)
+		err(1, "malloc");
 	lh->lh_next = *lhp;
 	lh->lh_hash = h;
 	lh->lh_cmd = cp;

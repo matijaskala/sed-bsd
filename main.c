@@ -1,6 +1,6 @@
-/*	$NetBSD: main.c,v 1.34 2015/03/12 12:40:41 christos Exp $	*/
-
 /*-
+ * SPDX-License-Identifier: BSD-3-Clause
+ *
  * Copyright (c) 2013 Johann 'Myrkraverk' Oskarsson.
  * Copyright (c) 1992 Diomidis Spinellis.
  * Copyright (c) 1992, 1993
@@ -34,22 +34,16 @@
  * SUCH DAMAGE.
  */
 
-#if HAVE_NBTOOL_CONFIG_H
-#include "nbtool_config.h"
-#endif
-
 #include <sys/cdefs.h>
-__RCSID("$NetBSD: main.c,v 1.34 2015/03/12 12:40:41 christos Exp $");
-#ifdef __FBSDID
-__FBSDID("$FreeBSD: head/usr.bin/sed/main.c 252231 2013-06-26 04:14:19Z pfg $");
+__FBSDID("$FreeBSD$");
+
+#ifndef lint
+static const char copyright[] =
+"@(#) Copyright (c) 1992, 1993\n\
+	The Regents of the University of California.  All rights reserved.\n";
 #endif
 
 #ifndef lint
-__COPYRIGHT("@(#) Copyright (c) 1992, 1993\
-	The Regents of the University of California.  All rights reserved.");
-#endif
-
-#if 0
 static const char sccsid[] = "@(#)main.c	8.2 (Berkeley) 1/3/94";
 #endif
 
@@ -108,6 +102,7 @@ FILE *outfile;			/* Current output file */
 
 int aflag, eflag, nflag;
 int rflags = 0;
+int quit = 0;
 static int rval;		/* Exit status */
 
 static int ispan;		/* Whether inplace editing spans across files */
@@ -121,7 +116,7 @@ const char *fname;		/* File name. */
 const char *outfname;		/* Output file name */
 static char oldfname[PATH_MAX];	/* Old file name (for in-place editing) */
 static char tmpfname[PATH_MAX];	/* Temporary file name (for in-place editing) */
-static const char *inplace;	/* Inplace edit file extension. */
+const char *inplace;		/* Inplace edit file extension. */
 u_long linenum;
 
 static void add_compunit(enum e_cut, char *);
@@ -131,13 +126,13 @@ static void usage(void);
 int
 main(int argc, char *argv[])
 {
-	int c, fflag;
+	int c, fflag, fflagstdin;
 	char *temp_arg;
 
-	setprogname(argv[0]);
 	(void) setlocale(LC_ALL, "");
 
 	fflag = 0;
+	fflagstdin = 0;
 	inplace = NULL;
 
 	while ((c = getopt(argc, argv, "EI::ae:f:i::lnru")) != -1)
@@ -155,13 +150,16 @@ main(int argc, char *argv[])
 			break;
 		case 'e':
 			eflag = 1;
-			temp_arg = xmalloc(strlen(optarg) + 2);
+			if ((temp_arg = malloc(strlen(optarg) + 2)) == NULL)
+				err(1, "malloc");
 			strcpy(temp_arg, optarg);
 			strcat(temp_arg, "\n");
 			add_compunit(CU_STRING, temp_arg);
 			break;
 		case 'f':
 			fflag = 1;
+			if (strcmp(optarg, "-") == 0)
+				fflagstdin = 1;
 			add_compunit(CU_FILE, optarg);
 			break;
 		case 'i':
@@ -175,7 +173,7 @@ main(int argc, char *argv[])
 			c = setlinebuf(stdout);
 #endif
 			if (c)
-				warn("setting line buffered output failed");
+				warnx("setting line buffered output failed");
 			break;
 		case 'n':
 			nflag = 1;
@@ -188,7 +186,7 @@ main(int argc, char *argv[])
 			errno = EOPNOTSUPP;
 #endif
 			if (c)
-				warn("setting unbuffered output failed");
+				warnx("setting unbuffered output failed");
 			break;
 		default:
 		case '?':
@@ -209,6 +207,8 @@ main(int argc, char *argv[])
 	if (*argv)
 		for (; *argv; argv++)
 			add_file(*argv);
+	else if (fflagstdin)
+		exit(rval);
 	else
 		add_file(NULL);
 	process();
@@ -222,9 +222,9 @@ static void
 usage(void)
 {
 	(void)fprintf(stderr,
-	    "Usage:  %s [-aElnru] command [file ...]\n"
-	    "\t%s [-aElnru] [-e command] [-f command_file] [-I[extension]]\n"
-	    "\t    [-i[extension]] [file ...]\n", getprogname(), getprogname());
+	    "usage: %s script [-Ealnru] [-i[extension]] [-I[extension]] [file ...]\n"
+	    "\t%s [-Ealnru] [-i[extension]] [-I[extension]] [-e script] ... [-f script_file]"
+	    " ...   [file ...]\n", getprogname(), getprogname());
 	exit(1);
 }
 
@@ -252,9 +252,14 @@ again:
 		linenum = 0;
 		switch (script->type) {
 		case CU_FILE:
-			if ((f = fopen(script->s, "r")) == NULL)
-				err(1, "%s", script->s);
-			fname = script->s;
+			if (strcmp(script->s, "-") == 0) {
+				f = stdin;
+				fname = "stdin";
+			} else {
+				if ((f = fopen(script->s, "r")) == NULL)
+				        err(1, "%s", script->s);
+				fname = script->s;
+			}
 			state = ST_FILE;
 			goto again;
 		case CU_STRING:
@@ -332,7 +337,8 @@ int
 mf_fgets(SPACE *sp, enum e_spflag spflag)
 {
 	struct stat sb;
-	size_t len;
+	ssize_t len;
+	char *dirbuf, *basebuf;
 	static char *p = NULL;
 	static size_t plen = 0;
 	int c;
@@ -352,7 +358,7 @@ mf_fgets(SPACE *sp, enum e_spflag spflag)
 	}
 
 	for (;;) {
-		if (infile != NULL && (c = getc(infile)) != EOF) {
+		if (infile != NULL && (c = getc(infile)) != EOF && !quit) {
 			(void)ungetc(c, infile);
 			break;
 		}
@@ -409,7 +415,7 @@ mf_fgets(SPACE *sp, enum e_spflag spflag)
 		if (inplace != NULL) {
 			if (lstat(fname, &sb) != 0)
 				err(1, "%s", fname);
-			if (!(sb.st_mode & S_IFREG))
+			if (!S_ISREG(sb.st_mode))
 				errx(1, "%s: %s %s", fname,
 				    "in-place editing only",
 				    "works for regular files");
@@ -418,16 +424,18 @@ mf_fgets(SPACE *sp, enum e_spflag spflag)
 				    sizeof(oldfname));
 				len = strlcat(oldfname, inplace,
 				    sizeof(oldfname));
-				if (len > sizeof(oldfname))
+				if (len > (ssize_t)sizeof(oldfname))
 					errx(1, "%s: name too long", fname);
 			}
-			char d_name[PATH_MAX], f_name[PATH_MAX];
-			(void)strlcpy(d_name, fname, sizeof(d_name));
-			(void)strlcpy(f_name, fname, sizeof(f_name));
-			len = (size_t)snprintf(tmpfname, sizeof(tmpfname),
-			    "%s/.!%ld!%s", dirname(d_name), (long)getpid(),
-			    basename(f_name));
-			if (len >= sizeof(tmpfname))
+			if ((dirbuf = strdup(fname)) == NULL ||
+			    (basebuf = strdup(fname)) == NULL)
+				err(1, "strdup");
+			len = snprintf(tmpfname, sizeof(tmpfname),
+			    "%s/.!%ld!%s", dirname(dirbuf), (long)getpid(),
+			    basename(basebuf));
+			free(dirbuf);
+			free(basebuf);
+			if (len >= (ssize_t)sizeof(tmpfname))
 				errx(1, "%s: name too long", fname);
 			unlink(tmpfname);
 			if (outfile != NULL && outfile != stdout)
@@ -459,12 +467,18 @@ mf_fgets(SPACE *sp, enum e_spflag spflag)
 	 * data.  The p and plen are static so each invocation gives
 	 * getline() the same buffer which is expanded as needed.
 	 */
-	ssize_t slen = getline(&p, &plen, infile);
-	if (slen == -1)
+	len = getline(&p, &plen, infile);
+	if (len == -1)
 		err(1, "%s", fname);
-	if (slen != 0 && p[slen - 1] == '\n')
-		slen--;
-	cspace(sp, p, (size_t)slen, spflag);
+	if (len != 0 && p[len - 1] == '\n') {
+		sp->append_newline = 1;
+		len--;
+	} else if (!lastline()) {
+		sp->append_newline = 1;
+	} else {
+		sp->append_newline = 0;
+	}
+	cspace(sp, p, len, spflag);
 
 	linenum++;
 
@@ -479,7 +493,8 @@ add_compunit(enum e_cut type, char *s)
 {
 	struct s_compunit *cu;
 
-	cu = xmalloc(sizeof(struct s_compunit));
+	if ((cu = malloc(sizeof(struct s_compunit))) == NULL)
+		err(1, "malloc");
 	cu->type = type;
 	cu->s = s;
 	cu->next = NULL;
@@ -495,11 +510,40 @@ add_file(char *s)
 {
 	struct s_flist *fp;
 
-	fp = xmalloc(sizeof(struct s_flist));
+	if ((fp = malloc(sizeof(struct s_flist))) == NULL)
+		err(1, "malloc");
 	fp->next = NULL;
 	*fl_nextp = fp;
 	fp->fname = s;
 	fl_nextp = &fp->next;
+}
+
+static int
+next_files_have_lines(void)
+{
+	struct s_flist *file;
+	FILE *file_fd;
+	int ch;
+
+	file = files;
+	while ((file = file->next) != NULL) {
+		if ((file_fd = fopen(file->fname, "r")) == NULL)
+			continue;
+
+		if ((ch = getc(file_fd)) != EOF) {
+			/*
+			 * This next file has content, therefore current
+			 * file doesn't contains the last line.
+			 */
+			ungetc(ch, file_fd);
+			fclose(file_fd);
+			return (1);
+		}
+
+		fclose(file_fd);
+	}
+
+	return (0);
 }
 
 int
@@ -507,10 +551,16 @@ lastline(void)
 {
 	int ch;
 
-	if (files->next != NULL && (inplace == NULL || ispan))
-		return (0);
-	if ((ch = getc(infile)) == EOF)
-		return (1);
+	if (feof(infile)) {
+		return !(
+		    (inplace == NULL || ispan) &&
+		    next_files_have_lines());
+	}
+	if ((ch = getc(infile)) == EOF) {
+		return !(
+		    (inplace == NULL || ispan) &&
+		    next_files_have_lines());
+	}
 	ungetc(ch, infile);
 	return (0);
 }

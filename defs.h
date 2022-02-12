@@ -1,6 +1,6 @@
-/*	$NetBSD: defs.h,v 1.12 2014/06/06 21:56:39 wiz Exp $	*/
-
 /*-
+ * SPDX-License-Identifier: BSD-3-Clause
+ *
  * Copyright (c) 1992 Diomidis Spinellis.
  * Copyright (c) 1992, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -33,7 +33,7 @@
  * SUCH DAMAGE.
  *
  *	@(#)defs.h	8.1 (Berkeley) 6/6/93
- * $FreeBSD: head/usr.bin/sed/defs.h 192732 2009-05-25 06:45:33Z brian $
+ * $FreeBSD$
  */
 
 /*
@@ -43,7 +43,7 @@ enum e_atype {
 	AT_RE	    = 1,			/* Line that match RE */
 	AT_LINE,				/* Specific line */
 	AT_RELLINE,				/* Relative line */
-	AT_LAST					/* Last line */
+	AT_LAST,				/* Last line */
 };
 
 /*
@@ -83,7 +83,7 @@ struct s_tr {
 		size_t tolen;
 		char to[MB_LEN_MAX];
 	} *multis;
-	size_t nmultis;
+	int nmultis;
 };
 
 /*
@@ -135,7 +135,7 @@ struct s_appends {
 
 enum e_spflag {
 	APPEND,					/* Append to the contents. */
-	REPLACE					/* Replace the contents. */
+	REPLACE,				/* Replace the contents. */
 };
 
 /*
@@ -145,6 +145,7 @@ typedef struct {
 	char *space;		/* Current space pointer. */
 	size_t len;		/* Current length. */
 	int deleted;		/* If deleted. */
+	int append_newline;	/* If originally terminated by \n. */
 	char *back;		/* Backing memory. */
 	size_t blen;		/* Backing memory length. */
 } SPACE;
