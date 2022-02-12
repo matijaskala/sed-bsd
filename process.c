@@ -689,7 +689,7 @@ regexec_e(regex_t *preg, const char *string, int eflags, int nomatch,
 
 	/* Set anchors */
 #ifndef REG_STARTEND
-	if ((buf = strndup(string, stop - start)) == NULL)
+	if ((buf = strndup(string + start, stop - start)) == NULL)
 		err(1, "strndup");
 	eval = regexec(defpreg, buf,
 	    nomatch ? 0 : maxnsub + 1, match, eflags);
