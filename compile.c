@@ -83,7 +83,7 @@ static char	 *compile_delimited(char *, char *, int);
 static char	 *compile_flags(char *, struct s_subst *);
 static regex_t	 *compile_re(char *, int);
 static char	 *compile_subst(char *, struct s_subst *);
-static char	 *compile_text(const char *);
+static char	 *compile_text(char *);
 static char	 *compile_tr(char *, struct s_tr **);
 static struct s_command
 		**compile_stream(struct s_command **);
