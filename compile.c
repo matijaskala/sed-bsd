@@ -483,10 +483,6 @@ compile_ccl(char **sp, char *t)
 				*t = '\t';
 				s++;
 				break;
-			case 'x':
-				if (dohex(&s[2], t, &hexlen))
-					s += hexlen + 1;
-				break;
 			}
 		}
 	}
