@@ -284,7 +284,7 @@ nonsel:		/* Now parse the command */
 				cmd->t = compile_text(p);
 				break;
 			}
-			cmd->t = compile_text("");
+			cmd->t = compile_text(NULL);
 			break;
 		case COMMENT:			/* \0 # */
 			break;
@@ -888,6 +888,8 @@ compile_text(char *p)
 		err(1, "malloc");
 	size = 0;
 	do {
+		if (!p)
+			continue;
 		op = s = text + size;
 		for (esc_nl = 0; *p != '\0'; p++) {
 			if (*p == '\\' && p[1] != '\0' && *++p == '\n')
