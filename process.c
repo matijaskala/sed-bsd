@@ -689,9 +689,8 @@ regexec_e(regex_t *preg, const char *string, int eflags, int nomatch,
 
 	/* Set anchors */
 #ifndef REG_STARTEND
-	buf = xmalloc(stop - start + 1);
-	(void)memcpy(buf, string, stop - start);
-	buf[slen] = '\0';
+	if ((buf = strndup(string, stop - start)) == NULL)
+		err(1, "strndup");
 	eval = regexec(defpreg, buf,
 	    nomatch ? 0 : maxnsub + 1, match, eflags);
 	free(buf);
