@@ -169,10 +169,10 @@ compile_stream(struct s_command **link)
 	char re[_POSIX2_LINE_MAX + 1];
 	int naddr;				/* Number of addresses */
 
-	stack = 0;
+	stack = NULL;
 	for (;;) {
 		if ((p = cu_fgets(lbuf, sizeof(lbuf), NULL)) == NULL) {
-			if (stack != 0)
+			if (stack != NULL)
 				errx(1, "%lu: %s: unexpected EOF (pending }'s)",
 							linenum, fname);
 			return (link);
@@ -208,9 +208,9 @@ semicolon:	EATSPACE();
 				p = compile_addr(p, cmd->a2);
 				EATSPACE();
 			} else
-				cmd->a2 = 0;
+				cmd->a2 = NULL;
 		} else
-			cmd->a1 = cmd->a2 = 0;
+			cmd->a1 = cmd->a2 = NULL;
 
 nonsel:		/* Now parse the command */
 		if (!*p)
@@ -229,7 +229,7 @@ nonsel:		/* Now parse the command */
 		case NONSEL:			/* ! */
 			p++;
 			EATSPACE();
-			cmd->nonsel = ! cmd->nonsel;
+			cmd->nonsel = 1;
 			goto nonsel;
 		case GROUP:			/* { */
 			p++;
@@ -246,7 +246,7 @@ nonsel:		/* Now parse the command */
 			 * group is really just a noop.
 			 */
 			cmd->nonsel = 1;
-			if (stack == 0)
+			if (stack == NULL)
 				errx(1, "%lu: %s: unexpected }", linenum, fname);
 			cmd2 = stack;
 			stack = cmd2->next;
@@ -382,7 +382,7 @@ nonsel:		/* Now parse the command */
 }
 
 /*
- * Get a delimited string.  P points to the delimeter of the string; d points
+ * Get a delimited string.  P points to the delimiter of the string; d points
  * to a buffer area.  Newline and delimiter escapes are processed; other
  * escapes are ignored.
  *
@@ -406,15 +406,34 @@ compile_delimited(char *p, char *d, int is_tr)
 				linenum, fname);
 	while (*p) {
 		if (*p == '[' && *p != c) {
-			if ((d = compile_ccl(&p, d)) == NULL)
-				errx(1, "%lu: %s: unbalanced brackets ([])", linenum, fname);
-			continue;
+			if (!is_tr) {
+				if ((d = compile_ccl(&p, d)) == NULL) {
+					errx(1,
+					    "%lu: %s: unbalanced brackets ([])",
+					    linenum, fname);
+				}
+				continue;
+			}
 		} else if (*p == '\\' && p[1] == '[') {
-			*d++ = *p++;
-		} else if (*p == '\\' && p[1] == c)
+			if (is_tr)
+				p++;
+			else
+				*d++ = *p++;
+		} else if (*p == '\\' && p[1] == c) {
 			p++;
-		else if (*p == '\\' && p[1] == 'n') {
-			*d++ = '\n';
+		} else if (*p == '\\' &&
+		    (p[1] == 'n' || p[1] == 'r' || p[1] == 't')) {
+			switch (p[1]) {
+			case 'n':
+				*d++ = '\n';
+				break;
+			case 'r':
+				*d++ = '\r';
+				break;
+			case 't':
+				*d++ = '\t';
+				break;
+			}
 			p += 2;
 			continue;
 		} else if (*p == '\\' && p[1] == '\\') {
@@ -444,13 +463,33 @@ compile_ccl(char **sp, char *t)
 		*t++ = *s++;
 	if (*s == ']')
 		*t++ = *s++;
-	for (; *s && (*t = *s) != ']'; s++, t++)
+	for (; *s && (*t = *s) != ']'; s++, t++) {
 		if (*s == '[' && ((d = *(s+1)) == '.' || d == ':' || d == '=')) {
 			*++t = *++s, t++, s++;
 			for (c = *s; (*t = *s) != ']' || c != d; s++, t++)
 				if ((c = *s) == '\0')
 					return NULL;
+		} else if (*s == '\\') {
+			switch (s[1]) {
+			case 'n':
+				*t = '\n';
+				s++;
+				break;
+			case 'r':
+				*t = '\r';
+				s++;
+				break;
+			case 't':
+				*t = '\t';
+				s++;
+				break;
+			case 'x':
+				if (dohex(&s[2], t, &hexlen))
+					s += hexlen + 1;
+				break;
+			}
 		}
+	}
 	return (*s == ']') ? *sp = ++s, ++t : NULL;
 }
 
@@ -535,8 +574,23 @@ compile_subst(char *p, struct s_subst *s)
 								linenum, fname, *p);
 					if (s->maxbref < ref)
 						s->maxbref = ref;
-				} else if (*p == '&' || *p == '\\')
-					*sp++ = '\\';
+				} else {
+					switch (*p) {
+					case '&':
+					case '\\':
+						*sp++ = '\\';
+						break;
+					case 'n':
+						*p = '\n';
+						break;
+					case 'r':
+						*p = '\r';
+						break;
+					case 't':
+						*p = '\t';
+						break;
+					}
+				}
 			} else if (*p == c) {
 				if (*++p == '\0' && more) {
 					if (cu_fgets(lbuf, sizeof(lbuf), &more))
@@ -558,7 +612,7 @@ compile_subst(char *p, struct s_subst *s)
 			asize *= 2;
 			text = xrealloc(text, asize);
 		}
-	} while (cu_fgets(p = lbuf, sizeof(lbuf), &more));
+	} while (cu_fgets(p = lbuf, sizeof(lbuf), &more) != NULL);
 	errx(1, "%lu: %s: unterminated substitute in regular expression",
 			linenum, fname);
 	/* NOTREACHED */
@@ -742,32 +796,19 @@ compile_tr(char *p, struct s_tr **py)
  * Compile the text following an a or i command.
  */
 static char *
-compile_text(const char *prepend)
+compile_text(char *p)
 {
 	size_t asize, size;
 	int esc_nl;
-	const char *p, *op;
+	const char *op;
 	char *text, *s;
 	char lbuf[_POSIX2_LINE_MAX + 1];
 
 	asize = 2 * _POSIX2_LINE_MAX + 1;
 	text = xmalloc(asize);
-	op = s = text;
-	p = prepend;
-	if (*prepend)
-		for (esc_nl = 0; *p != '\0'; p++) {
-			if (*p == '\\' && p[1] != '\0' && *++p == '\n')
-				esc_nl = 1;
-			*s++ = *p;
-		}
-	else
-		esc_nl = 1;
-	size = (size_t)(s - op);
-	if (!esc_nl)
-		*s = '\0';
-	else while (cu_fgets(lbuf, sizeof(lbuf), NULL)) {
+	size = 0;
+	do {
 		op = s = text + size;
-		p = lbuf;
 		for (esc_nl = 0; *p != '\0'; p++) {
 			if (*p == '\\' && p[1] != '\0' && *++p == '\n')
 				esc_nl = 1;
@@ -782,11 +823,12 @@ compile_text(const char *prepend)
 			asize *= 2;
 			text = xrealloc(text, asize);
 		}
-	}
+	} while (cu_fgets(p = lbuf, sizeof(lbuf), NULL) != NULL);
 	if (text[size-1] != '\n')
 		text[size++] = '\n';
 	text[size] = '\0';
-	return xrealloc(text, size + 1);
+	text = xrealloc(text, size + 1);
+	return text;
 }
 
 /*
