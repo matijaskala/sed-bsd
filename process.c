@@ -243,6 +243,12 @@ redirect:
 					goto redirect;
 				}
 				break;
+			case 'T':
+				if (!sdone) {
+					cp = cp->u.c;
+					goto redirect;
+				}
+				break;
 			case 'w':
 				if (pd)
 					break;
