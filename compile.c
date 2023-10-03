@@ -119,6 +119,7 @@ static struct s_format cmd_fmts[] = {
 	{'r', 1, RFILE},
 	{'s', 2, SUBST},
 	{'t', 2, BRANCH},
+	{'T', 2, BRANCH},
 	{'w', 2, WFILE},
 	{'x', 2, EMPTY},
 	{'y', 2, TR},
